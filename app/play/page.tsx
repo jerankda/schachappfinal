@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/app/context/auth-context"
 import { ChessBoard } from "@/components/chess-board"
 import { GameControls } from "@/components/game-controls"
@@ -10,9 +10,11 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
+import { useRouter } from "next/navigation"
 
 export default function PlayPage() {
   const { user } = useAuth()
+  const router = useRouter()
   const [opponentName, setOpponentName] = useState("")
   const [status, setStatus] = useState("")
 
@@ -26,6 +28,17 @@ export default function PlayPage() {
     } else {
       toast.success("Invitation sent!")
       setStatus("Waiting for opponent to accept...")
+    }
+  }
+
+  const checkGameStatus = async () => {
+    if (!user) return
+    const invites = await api.getGameInvites(user.id)
+    const accepted = invites.find(inv => inv.game?.id)
+    if (accepted) {
+      router.push(`/game/${accepted.game.id}`)
+    } else {
+      toast.message("Noch keine Annahme", { description: "Der Gegner hat noch nicht reagiert." })
     }
   }
 
@@ -50,18 +63,17 @@ export default function PlayPage() {
               <Button onClick={handleInvite} className="bg-green-600 hover:bg-green-700">
                 Invite
               </Button>
+              <Button onClick={checkGameStatus} className="bg-blue-600 hover:bg-blue-700">
+                Spielstatus prüfen
+              </Button>
             </div>
             {status && <p className="text-gray-300">{status}</p>}
           </CardContent>
         </Card>
 
-        {/* Optional: Match Info oben */}
         <GameInfo />
-
-        {/* Buttons Draw / Resign etc. */}
         <GameControls />
 
-        {/* Schachbrett */}
         <div className="flex justify-center">
           <ChessBoard size="large" />
         </div>
