@@ -17,14 +17,18 @@ export default function LoginPage() {
 
   const handleLogin = async () => {
     const result = await login(email, password)
+
     if (!result.success) {
       setError(result.message || "Login fehlgeschlagen")
     }
+    // ❌ Kein result.user mehr notwendig!
   }
 
   useEffect(() => {
     if (user) {
-      router.push("/") // redirect to homepage on successful login
+      // user ist automatisch gesetzt durch den Context
+      localStorage.setItem("currentUser", JSON.stringify(user))
+      router.push("/")
     }
   }, [user])
 

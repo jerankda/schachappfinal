@@ -11,6 +11,8 @@ export default function GamePage() {
   const params = useParams()
   const router = useRouter()
   const [gameExists, setGameExists] = useState<boolean | null>(null)
+  const [game, setGame] = useState<any>(null)
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
   const gameIdParam = params.id
   const gameId = typeof gameIdParam === "string" ? parseInt(gameIdParam) : parseInt(gameIdParam[0])
@@ -21,14 +23,31 @@ export default function GamePage() {
       return
     }
 
-    // Prüfen, ob Spiel existiert
     api.getGameById(gameId).then((res) => {
       if (res && !res.error) {
+        setGame(res)
         setGameExists(true)
       } else {
         setGameExists(false)
       }
     })
+
+    // Aktuellen User aus localStorage lesen
+    const storedUser = localStorage.getItem("currentUser")
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser)
+        console.log("📦 Aktueller Nutzer aus localStorage:", parsed)
+        if (parsed?.id) setCurrentUserId(parsed.id)
+        else setCurrentUserId(-1)
+      } catch (err) {
+        console.error("❌ Fehler beim Parsen von localStorage:", err)
+        setCurrentUserId(-1)
+      }
+    } else {
+      console.warn("⚠️ Kein currentUser im localStorage gefunden")
+      setCurrentUserId(-1)
+    }
   }, [gameId])
 
   if (gameExists === false) {
@@ -42,7 +61,7 @@ export default function GamePage() {
     )
   }
 
-  if (gameExists === null) {
+  if (gameExists === null || !game) {
     return (
       <div className="min-h-screen bg-gray-900 p-4 text-white flex items-center justify-center">
         <p>Lade Spiel...</p>
@@ -55,11 +74,27 @@ export default function GamePage() {
       <div className="max-w-6xl mx-auto space-y-4">
         <h1 className="text-2xl font-bold">Game #{gameId}</h1>
 
+        {/* Spieleranzeige mit Weiß/Schwarz */}
+        <div className="flex justify-between items-center px-4 py-2 bg-gray-800 rounded text-white font-medium">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-400">(Weiß)</span>
+            <span className="font-bold">{game?.whitePlayer?.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-bold">{game?.blackPlayer?.name}</span>
+            <span className="text-sm text-gray-400">(Schwarz)</span>
+          </div>
+        </div>
+
         <GameInfo gameId={gameId} />
         <GameControls gameId={gameId} />
 
         <div className="flex justify-center">
-          <ChessBoard gameId={gameId} size="large" />
+          <ChessBoard
+            gameId={gameId}
+            currentUserId={currentUserId ?? -1}
+            size="large"
+          />
         </div>
       </div>
     </div>

@@ -26,15 +26,10 @@ export const api = {
   },
 
   async getFriendRequests(userId: number) {
-    const res = await fetch(`${API_BASE_URL}/friend-requests/${userId}`)
+    // ✅ FIXED endpoint here
+    const res = await fetch(`${API_BASE_URL}/friends/requests/${userId}`)
     return res.json()
   },
-
-    async getGame(gameId: number) {
-    const res = await fetch(`${API_BASE_URL}/games/${gameId}`)
-    return res.json()
-    },
-
 
   async acceptFriendRequest(requestId: number) {
     const res = await fetch(`${API_BASE_URL}/friend-request/${requestId}/accept`, {
@@ -69,9 +64,15 @@ export const api = {
   },
 
   async getGameById(gameId: number) {
-  const res = await fetch(`${API_BASE_URL}/games/${gameId}`)
-  return res.json()
-},
+    try {
+      const res = await fetch(`${API_BASE_URL}/games/${gameId}`)
+      if (!res.ok) throw new Error("Fehler beim Abrufen des Spiels")
+      return res.json()
+    } catch (err) {
+      console.error("❌ API getGameById Fehler:", err)
+      return null
+    }
+  },
 
   async getGameInvites(userId: number) {
     const res = await fetch(`${API_BASE_URL}/game-invites/${userId}`)

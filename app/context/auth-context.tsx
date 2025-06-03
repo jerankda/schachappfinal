@@ -1,4 +1,5 @@
 "use client"
+
 import { createContext, useContext, useEffect, useState } from "react"
 
 type User = {
@@ -28,6 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         setUser(JSON.parse(stored))
       } catch (err) {
+        console.error("❌ Fehler beim Parsen des Users:", err)
         localStorage.removeItem("user")
       }
     }
@@ -51,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem("user", JSON.stringify(data))
       return { success: true }
     } catch (err) {
-      console.error(err)
+      console.error("❌ Serverfehler beim Login:", err)
       return { success: false, message: "Serverfehler" }
     }
   }

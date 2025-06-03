@@ -4,9 +4,17 @@ require('dotenv').config()
 const { PrismaClient } = require('@prisma/client')
 const { Chess } = require('chess.js')
 const bcrypt = require('bcrypt')
+const http = require('http')
+const { Server } = require('socket.io')
 
 const app = express()
 const prisma = new PrismaClient()
+const server = http.createServer(app)
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+  },
+})
 const PORT = process.env.PORT || 4000
 
 app.use(cors())
@@ -14,7 +22,15 @@ app.use(express.json())
 
 console.log("Backend vollständig geladen ✅")
 
-// 🔐 Registrierung
+io.on('connection', (socket) => {
+  console.log('✅ Client verbunden:', socket.id)
+
+  socket.on('joinGame', (gameId) => {
+    socket.join(`game-${gameId}`)
+    console.log(`🎮 Client ist Game ${gameId} beigetreten`)
+  })
+})
+
 app.post('/register', async (req, res) => {
   const { email, name, password } = req.body
   if (!email || !password) return res.status(400).json({ error: 'Email und Passwort erforderlich' })
@@ -35,7 +51,6 @@ app.post('/register', async (req, res) => {
   }
 })
 
-// 🔑 Login
 app.post('/login', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) return res.status(400).json({ error: 'Email und Passwort erforderlich' })
@@ -54,12 +69,10 @@ app.post('/login', async (req, res) => {
   }
 })
 
-// 🌐 Test-Route
 app.get('/', (req, res) => {
   res.send('API läuft ✅')
 })
 
-// 👤 User-Routen
 app.get('/users', async (req, res) => {
   try {
     const users = await prisma.user.findMany()
@@ -79,8 +92,6 @@ app.get('/users/:id', async (req, res) => {
     res.status(500).json({ error: 'Fehler beim Abrufen des Nutzers' })
   }
 })
-
-// 👥 Freundschaft
 app.post('/friend-request', async (req, res) => {
   const { senderId, receiverId } = req.body
   try {
@@ -156,12 +167,13 @@ app.post('/friend-request/:id/decline', async (req, res) => {
   }
 })
 
-// ♟️ Spiele
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+
 app.post('/games', async (req, res) => {
   const { whitePlayerId, blackPlayerId } = req.body
   try {
     const game = await prisma.game.create({
-      data: { whitePlayerId, blackPlayerId, fen: 'startpos' },
+      data: { whitePlayerId, blackPlayerId, fen: START_FEN },
     })
     res.status(201).json(game)
   } catch (err) {
@@ -169,27 +181,66 @@ app.post('/games', async (req, res) => {
   }
 })
 
-app.post('/games/:id/move', async (req, res) => {
+app.get('/games/:id', async (req, res) => {
   const gameId = parseInt(req.params.id)
-  const { move } = req.body
   try {
-    const game = await prisma.game.findUnique({ where: { id: gameId } })
-    if (!game || game.isFinished) return res.status(400).json({ error: 'Ungültiges oder beendetes Spiel' })
+    const game = await prisma.game.findUnique({
+      where: { id: gameId },
+      include: {
+        whitePlayer: true,
+        blackPlayer: true,
+        moves: { orderBy: { createdAt: 'asc' } },
+      },
+    })
 
-    const chess = new Chess()
-    chess.load(game.fen)
-    const result = chess.move(move, { sloppy: true })
-    if (!result) return res.status(400).json({ error: 'Illegaler Zug' })
+    if (!game) return res.status(404).json({ error: 'Spiel nicht gefunden' })
 
-    await prisma.move.create({ data: { gameId, move, fen: chess.fen() } })
-    const updated = await prisma.game.update({ where: { id: gameId }, data: { fen: chess.fen() } })
-
-    res.json({ message: 'Zug gespeichert ✅', fen: updated.fen, move })
+    res.json(game)
   } catch (err) {
-    res.status(500).json({ error: 'Fehler beim Speichern des Zugs' })
+    res.status(500).json({ error: 'Fehler beim Laden des Spiels' })
   }
 })
 
+app.post('/games/:id/move', async (req, res) => {
+  const gameId = parseInt(req.params.id)
+  const { from, to } = req.body
+
+  try {
+    const game = await prisma.game.findUnique({ where: { id: gameId } })
+    if (!game || game.isFinished) {
+      return res.status(400).json({ error: 'Ungültiges oder beendetes Spiel' })
+    }
+
+    const chess = new Chess()
+    chess.load(game.fen)
+    console.log("Aktueller FEN vor load:", game.fen)
+
+    console.log("Versuchter Zug:", from, "→", to)
+    console.log("FEN vor Zug:", game.fen)
+
+    const result = chess.move({ from, to }, { sloppy: true })
+    if (!result) {
+      console.log("❌ Illegaler Zug:", { from, to })
+      return res.status(400).json({ error: 'Illegaler Zug' })
+    }
+
+    await prisma.move.create({ data: { gameId, move: `${from}-${to}`, fen: chess.fen() } })
+    const updated = await prisma.game.update({
+      where: { id: gameId },
+      data: { fen: chess.fen() },
+    })
+
+    io.to(`game-${gameId}`).emit('moveMade', {
+      fen: updated.fen,
+      move: `${from}-${to}`,
+    })
+
+    res.json({ message: 'Zug gespeichert ✅', fen: updated.fen, move: `${from}-${to}` })
+  } catch (err) {
+    console.error("Fehler beim Speichern des Zugs:", err)
+    res.status(500).json({ error: 'Fehler beim Speichern des Zugs' })
+  }
+})
 app.post('/games/:id/finish', async (req, res) => {
   const gameId = parseInt(req.params.id)
   const { winnerId } = req.body
@@ -199,6 +250,10 @@ app.post('/games/:id/finish', async (req, res) => {
 
     const white = await prisma.user.findUnique({ where: { id: game.whitePlayerId } })
     const black = await prisma.user.findUnique({ where: { id: game.blackPlayerId } })
+
+    if (!white || !black) {
+      return res.status(404).json({ error: 'Einer der Spieler wurde nicht gefunden.' })
+    }
 
     const winner = winnerId === white.id ? white : black
     const loser = winnerId === white.id ? black : white
@@ -216,11 +271,12 @@ app.post('/games/:id/finish', async (req, res) => {
 
     res.json({ message: 'Spiel beendet', updated, winnerElo: winner.elo + change, loserElo: loser.elo - change })
   } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'Fehler beim Beenden des Spiels' })
   }
 })
 
-// 🧩 Game Invites
+// 🎯 Game Invites
 app.post('/game-invite', async (req, res) => {
   const { senderName, receiverName } = req.body
 
@@ -236,7 +292,8 @@ app.post('/game-invite', async (req, res) => {
       data: {
         senderId: sender.id,
         receiverId: receiver.id,
-      }
+        status: 'pending',
+      },
     })
 
     res.status(201).json(invite)
@@ -268,7 +325,12 @@ app.post('/game-invite/:id/accept', async (req, res) => {
   const inviteId = parseInt(req.params.id)
 
   try {
-    const invite = await prisma.gameInvite.update({
+    const invite = await prisma.gameInvite.findUnique({ where: { id: inviteId } });
+    if (!invite || invite.status !== 'pending') {
+      return res.status(400).json({ error: 'Ungültige oder bereits bearbeitete Einladung' });
+    }
+
+    await prisma.gameInvite.update({
       where: { id: inviteId },
       data: { status: 'accepted' },
     })
@@ -277,40 +339,39 @@ app.post('/game-invite/:id/accept', async (req, res) => {
       data: {
         whitePlayerId: invite.receiverId,
         blackPlayerId: invite.senderId,
-        fen: 'startpos',
+        fen: START_FEN,
       },
     })
 
     res.json({ message: 'Spiel gestartet', game })
   } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'Fehler beim Annehmen der Einladung' })
   }
 })
 
-// 📥 Spiel laden
-app.get('/games/:id', async (req, res) => {
-  const gameId = parseInt(req.params.id)
+app.post('/game-invite/:id/decline', async (req, res) => {
+  const inviteId = parseInt(req.params.id)
 
   try {
-    const game = await prisma.game.findUnique({
-      where: { id: gameId },
-      include: {
-        whitePlayer: true,
-        blackPlayer: true,
-        moves: { orderBy: { createdAt: 'asc' } },
-      },
-    })
+    const invite = await prisma.gameInvite.findUnique({ where: { id: inviteId } });
+    if (!invite || invite.status !== 'pending') {
+      return res.status(400).json({ error: 'Ungültige oder bereits bearbeitete Einladung' });
+    }
 
-    if (!game) return res.status(404).json({ error: 'Spiel nicht gefunden' })
+    const declinedInvite = await prisma.gameInvite.update({
+      where: { id: inviteId },
+      data: { status: 'declined' },
+    });
 
-    res.json(game)
+    res.json({ message: 'Einladung abgelehnt', invite: declinedInvite });
   } catch (err) {
-    console.error("❌ Fehler beim Laden des Spiels:", err)
-    res.status(500).json({ error: 'Fehler beim Laden des Spiels' })
+    console.error(err);
+    res.status(500).json({ error: 'Fehler beim Ablehnen der Einladung' });
   }
 })
 
-// Serverstart
-app.listen(PORT, () => {
+// 🚀 Server starten
+server.listen(PORT, () => {
   console.log(`Server läuft auf http://localhost:${PORT}`)
 })
